@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { rest } from 'msw';
 import { setupServer } from 'msw/node';
@@ -108,7 +108,7 @@ describe('App Component', () => {
     });
   });
 
-  test('adds a new todo', async () => {
+  test('adds a new todo and clears the form', async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -123,6 +123,9 @@ describe('App Component', () => {
     await waitFor(() => {
       expect(screen.getByText('Write demo notes')).toBeInTheDocument();
     });
+
+    // Form should be cleared after successful add
+    expect(titleInput).toHaveValue('');
   });
 
   test('filters completed todos', async () => {
@@ -150,6 +153,39 @@ describe('App Component', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch todos');
+    });
+  });
+
+  test('toggles a todo between complete and incomplete', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    // Wait for todos to load and find Plan sprint's row
+    const titleEl = await screen.findByText('Plan sprint');
+    const listItem = titleEl.closest('li');
+    const checkbox = within(listItem).getByRole('checkbox');
+    expect(checkbox).not.toBeChecked();
+
+    await user.click(checkbox);
+
+    await waitFor(() => {
+      expect(within(listItem).getByRole('checkbox')).toBeChecked();
+    });
+  });
+
+  test('deletes a todo and removes it from the list', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Plan sprint')).toBeInTheDocument();
+    });
+
+    const deleteButton = screen.getByRole('button', { name: /delete Plan sprint/i });
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Plan sprint')).not.toBeInTheDocument();
     });
   });
 });

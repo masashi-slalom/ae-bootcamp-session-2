@@ -1,5 +1,9 @@
 const request = require('supertest');
-const { app } = require('../../src/app');
+const { app, db } = require('../../src/app');
+
+afterAll(() => {
+  if (db) db.close();
+});
 
 describe('Todos API Integration', () => {
   it('creates, edits, toggles, filters, and deletes a todo', async () => {
@@ -72,5 +76,25 @@ describe('Todos API Integration', () => {
     expect(taskBIndex).toBeGreaterThanOrEqual(0);
     expect(taskAIndex).toBeGreaterThanOrEqual(0);
     expect(taskBIndex).toBeLessThan(taskAIndex);
+  });
+
+  it('returns 404 when updating a non-existent todo', async () => {
+    const response = await request(app).put('/api/todos/999999').send({ title: 'Ghost' });
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('Todo not found');
+  });
+
+  it('returns 400 when updating a todo with invalid payload', async () => {
+    const created = await request(app).post('/api/todos').send({ title: 'Valid todo' });
+    const response = await request(app)
+      .put(`/api/todos/${created.body.id}`)
+      .send({ dueDate: 'not-a-date' });
+    expect(response.status).toBe(400);
+  });
+
+  it('returns 404 when toggling a non-existent todo', async () => {
+    const response = await request(app).patch('/api/todos/999999/toggle');
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('Todo not found');
   });
 });
