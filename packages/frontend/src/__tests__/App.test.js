@@ -1,136 +1,155 @@
-import React, { act } from 'react';
+import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { rest } from 'msw';
 import { setupServer } from 'msw/node';
 import App from '../App';
 
-// Mock server to intercept API requests
+const initialTodos = [
+  {
+    id: 1,
+    title: 'Plan sprint',
+    description: 'Refine stories',
+    dueDate: '2030-01-02',
+    completed: false,
+    createdAt: '2030-01-01T10:00:00.000Z',
+    updatedAt: '2030-01-01T10:00:00.000Z',
+  },
+  {
+    id: 2,
+    title: 'Retro prep',
+    description: '',
+    dueDate: null,
+    completed: true,
+    createdAt: '2030-01-01T09:00:00.000Z',
+    updatedAt: '2030-01-01T09:00:00.000Z',
+  },
+];
+
+let todos = [];
+
 const server = setupServer(
-  // GET /api/items handler
-  rest.get('/api/items', (req, res, ctx) => {
-    return res(
-      ctx.status(200),
-      ctx.json([
-        { id: 1, name: 'Test Item 1', created_at: '2023-01-01T00:00:00.000Z' },
-        { id: 2, name: 'Test Item 2', created_at: '2023-01-02T00:00:00.000Z' },
-      ])
-    );
-  }),
-  
-  // POST /api/items handler
-  rest.post('/api/items', (req, res, ctx) => {
-    const { name } = req.body;
-    
-    if (!name || name.trim() === '') {
-      return res(
-        ctx.status(400),
-        ctx.json({ error: 'Item name is required' })
-      );
+  rest.get('/api/todos', (req, res, ctx) => {
+    const status = req.url.searchParams.get('status') || 'all';
+    let responseTodos = todos;
+
+    if (status === 'active') {
+      responseTodos = todos.filter((todo) => !todo.completed);
     }
-    
-    return res(
-      ctx.status(201),
-      ctx.json({
-        id: 3,
-        name,
-        created_at: new Date().toISOString(),
-      })
-    );
+
+    if (status === 'completed') {
+      responseTodos = todos.filter((todo) => todo.completed);
+    }
+
+    return res(ctx.status(200), ctx.json(responseTodos));
+  }),
+
+  rest.post('/api/todos', (req, res, ctx) => {
+    const requestBody = req.body;
+    if (!requestBody.title || !requestBody.title.trim()) {
+      return res(ctx.status(400), ctx.json({ error: 'Todo title is required' }));
+    }
+
+    const newTodo = {
+      id: todos.length + 10,
+      title: requestBody.title,
+      description: requestBody.description || '',
+      dueDate: requestBody.dueDate,
+      completed: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    todos = [newTodo, ...todos];
+    return res(ctx.status(201), ctx.json(newTodo));
+  }),
+
+  rest.patch('/api/todos/:id/toggle', (req, res, ctx) => {
+    const id = Number(req.params.id);
+    const todoToUpdate = todos.find((todo) => todo.id === id);
+    if (!todoToUpdate) {
+      return res(ctx.status(404), ctx.json({ error: 'Todo not found' }));
+    }
+
+    todoToUpdate.completed = !todoToUpdate.completed;
+    return res(ctx.status(200), ctx.json(todoToUpdate));
+  }),
+
+  rest.delete('/api/todos/:id', (req, res, ctx) => {
+    const id = Number(req.params.id);
+    todos = todos.filter((todo) => todo.id !== id);
+    return res(ctx.status(200), ctx.json({ message: 'Todo deleted successfully', id }));
   })
 );
 
-// Setup and teardown for the mock server
 beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  todos = [...initialTodos];
+  localStorage.clear();
+  server.resetHandlers();
+});
 afterAll(() => server.close());
 
 describe('App Component', () => {
-  test('renders the header', async () => {
-    await act(async () => {
-      render(<App />);
-    });
-    expect(screen.getByText('React Frontend with Node Backend')).toBeInTheDocument();
-    expect(screen.getByText('Connected to in-memory database')).toBeInTheDocument();
+  beforeEach(() => {
+    todos = [...initialTodos];
   });
 
-  test('loads and displays items', async () => {
-    await act(async () => {
-      render(<App />);
-    });
-    
-    // Initially shows loading state
-    expect(screen.getByText('Loading data...')).toBeInTheDocument();
-    
-    // Wait for items to load
+  test('renders the todo planner heading', async () => {
+    render(<App />);
+    expect(await screen.findByText('TODO Planner')).toBeInTheDocument();
+  });
+
+  test('loads and displays todos', async () => {
+    render(<App />);
+
     await waitFor(() => {
-      expect(screen.getByText('Test Item 1')).toBeInTheDocument();
-      expect(screen.getByText('Test Item 2')).toBeInTheDocument();
+      expect(screen.getByText('Plan sprint')).toBeInTheDocument();
+      expect(screen.getByText('Retro prep')).toBeInTheDocument();
     });
   });
 
-  test('adds a new item', async () => {
+  test('adds a new todo', async () => {
     const user = userEvent.setup();
-    
-    await act(async () => {
-      render(<App />);
-    });
-    
-    // Wait for items to load
+    render(<App />);
+
     await waitFor(() => {
-      expect(screen.queryByText('Loading data...')).not.toBeInTheDocument();
+      expect(screen.getByText('Plan sprint')).toBeInTheDocument();
     });
-    
-    // Fill in the form and submit
-    const input = screen.getByPlaceholderText('Enter item name');
-    await act(async () => {
-      await user.type(input, 'New Test Item');
-    });
-    
-    const submitButton = screen.getByText('Add Item');
-    await act(async () => {
-      await user.click(submitButton);
-    });
-    
-    // Check that the new item appears
+
+    const titleInput = screen.getByRole('textbox', { name: /Task Title/i });
+    await user.type(titleInput, 'Write demo notes');
+    await user.click(screen.getByRole('button', { name: 'Add Task' }));
+
     await waitFor(() => {
-      expect(screen.getByText('New Test Item')).toBeInTheDocument();
+      expect(screen.getByText('Write demo notes')).toBeInTheDocument();
     });
   });
 
-  test('handles API error', async () => {
-    // Override the default handler to simulate an error
+  test('filters completed todos', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const statusFilter = await screen.findByLabelText('Status');
+    await user.click(statusFilter);
+    await user.click(screen.getByRole('option', { name: 'Completed' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Retro prep')).toBeInTheDocument();
+      expect(screen.queryByText('Plan sprint')).not.toBeInTheDocument();
+    });
+  });
+
+  test('shows API error message when fetch fails', async () => {
     server.use(
-      rest.get('/api/items', (req, res, ctx) => {
+      rest.get('/api/todos', (req, res, ctx) => {
         return res(ctx.status(500));
       })
     );
-    
-    await act(async () => {
-      render(<App />);
-    });
-    
-    // Wait for error message
-    await waitFor(() => {
-      expect(screen.getByText(/Failed to fetch data/)).toBeInTheDocument();
-    });
-  });
 
-  test('shows empty state when no items', async () => {
-    // Override the default handler to return empty array
-    server.use(
-      rest.get('/api/items', (req, res, ctx) => {
-        return res(ctx.status(200), ctx.json([]));
-      })
-    );
-    
-    await act(async () => {
-      render(<App />);
-    });
-    
-    // Wait for empty state message
+    render(<App />);
+
     await waitFor(() => {
-      expect(screen.getByText('No items found. Add some!')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to fetch todos');
     });
   });
 });
